@@ -34,8 +34,8 @@ Optional arguments:
 python tree_set_completion.py --k 3 --binary
 ```
 
-* `--k` limits the number of common leaves used during insertion-distance estimation.
-* `--binary` post-processes each completed tree to resolve multifurcations into a binary topology.
+* `--k` limits the number of common leaves used during insertion-distance estimation. Default: use all available common leaves.
+* `--binary` post-processes each completed tree to resolve multifurcations into a binary topology. Default: off.
 
 The script reads every `multiset_*.txt` file from `input_multisets/` and writes the corresponding completed multiset to:
 
