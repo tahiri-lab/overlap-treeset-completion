@@ -4,7 +4,7 @@ This folder contains the data and scripts used to evaluate the overlapping phylo
 
 ## Contents
 
-- `data/` — evaluation datasets and completed sets.
+- `data/` — evaluation input tree sets and completed sets.
 - evaluation scripts — code for running completion experiments, computing distance measures, and generating result summaries and plots.
 - This folder also contain saved intermediate or final evaluation outputs in `.pkl` and/or `.csv` format. These files are included for reproducibility and faster reuse of previously computed results. They can be used directly to regenerate tables and plots without rerunning the full evaluation pipeline. Unless stated otherwise in the corresponding script, saved result files are derived from the datasets in `data/` and the evaluation procedures described in the paper.
 
