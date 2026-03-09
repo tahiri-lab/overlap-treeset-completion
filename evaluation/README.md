@@ -56,8 +56,5 @@ The scripts in this folder support the main analyses reported in the paper, incl
 - BSD is unaffected by multifurcation resolution because pairwise leaf-to-leaf distances are preserved.
 - Some scripts may require external tools or additional dependencies depending on the baseline being reproduced.
 
-## Reproducibility
-
-All datasets and scripts in this folder are provided to make the experimental evaluation reproducible.
-
+---
 For details on dataset construction, baseline definitions, and evaluation methodology, see the associated paper.
