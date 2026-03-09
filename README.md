@@ -43,7 +43,7 @@ The script reads every `multiset_*.txt` file from `input_multisets/` and writes 
 
 ## Example dataset
 
-A small toy dataset with 10 overlapping input trees is included for testing and demonstration:
+A small test dataset with 10 overlapping input trees is included for testing and demonstration:
 
 * `input_multisets/multiset_1.txt`
 
