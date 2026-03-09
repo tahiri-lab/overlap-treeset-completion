@@ -1,4 +1,4 @@
-# Phylogenetic tree set completion in the context of supertrees
+# Overlapping phylogenetic tree set completion
 
 This project introduces an innovative method for completing a set of phylogenetic trees by minimizing the addition of new taxa while maintaining key evolutionary signals. Building on existing tree completion techniques, it incorporates consensus maximal completion subtrees and combined branch length data to enhance the process. Each tree in the set is iteratively completed by adding missing taxa using consensus subtrees derived from overlapping information in the other trees. The outcome is a collection of completed trees.
 
