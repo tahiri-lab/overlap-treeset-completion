@@ -1,60 +1,76 @@
 # Overlapping phylogenetic tree set completion
 
-This project introduces an innovative method for completing a set of phylogenetic trees by minimizing the addition of new taxa while maintaining key evolutionary signals. Building on existing tree completion techniques, it incorporates consensus maximal completion subtrees and combined branch length data to enhance the process. Each tree in the set is iteratively completed by adding missing taxa using consensus subtrees derived from overlapping information in the other trees. The outcome is a collection of completed trees.
+This repository contains a Python implementation of a **set-wide phylogenetic tree completion** algorithm for collections of rooted trees with **partially overlapping taxon sets**.
 
-## Features
+For each target tree, the algorithm identifies maximal completion subtrees (MCSs) supported by the other trees, builds a weighted majority-rule consensus for each selected subtree, rescales branch lengths using distances derived from common leaves, and inserts the consensus subtree at the position that minimizes a quadratic objective function on the original target tree branches.
 
-- **Preserves evolutionary signals**: Maintains key evolutionary relationships and branch lengths.
-- **Consensus-based approach**: Utilizes consensus maximal completion subtrees and aggregated branch lengths.
-- **Biologically meaningful**: Ensures the completion process is both relevant and computationally optimized.
-- **Completed trees**: completes input phylogenetic trees.
+## What the implementation does
 
-## Usage
+- Completes every tree in a multiset using overlap information from the other trees.
+- Uses consensus maximal completion subtrees to infer missing taxa groups.
+- Aggregates branch-length information across source trees.
+- Supports optional post-processing to enforce a binary topology.
+- Processes all matching input files in batch mode.
 
-### Input Format
+## Input format
 
-- **Input folder**: Place your input phylogenetic tree multisets in the `input_multisets` directory.
-- **File naming**: Each multiset should be in a separate text file named `multiset_X.txt`, where `X` is a unique identifier (e.g., `multiset_1.txt`).
-- **Tree format**: Each line in the input file should contain a single phylogenetic tree in Newick format.
+Place one tree set per file in `input_multisets/`, using filenames of the form:
 
+`multiset_X.txt`
 
-### Running the Script
+Each line of a file must contain one rooted phylogenetic tree in Newick format. Branch lengths should be included.
 
-The main script is `tree_set_completion.py`. To execute the script:
+## Running the script
 
-1. **Ensure input files are in place**
+Basic run:
 
-   Place all your multiset files in the `input_multisets` directory.
+```bash
+python tree_set_completion.py
+````
 
-2. **Run the script**
+Optional arguments:
 
-   ```bash
-   python tree_set_completion.py
-   ```
+```bash
+python tree_set_completion.py --k 3 --binary
+```
 
-   *Note: The script is configured to process files named `multiset_X.txt` in the `input_multisets` folder and output completed trees to the `completed_multisets` folder as `completed_multiset_X.txt`.*
+* `--k` limits the number of common leaves used during insertion-distance estimation.
+* `--binary` post-processes each completed tree to resolve multifurcations into a binary topology.
 
-### Output Format
+The script reads every `multiset_*.txt` file from `input_multisets/` and writes the corresponding completed multiset to:
 
-- **Output folder**: Completed phylogenetic tree multisets are saved in the `completed_multisets` directory.
-- **File naming**: Each completed multiset file corresponds to its input, named `completed_multiset_X.txt`.
-- **Tree format**: Each line in the output file contains a completed phylogenetic tree in Newick format.
+`completed_multisets/completed_multiset_X.txt`
 
+## Example dataset
+
+A small toy dataset with 10 overlapping input trees is included for testing and demonstration:
+
+* `input_multisets/multiset_1.txt`
+
+This example uses a shared taxa across all trees plus partially overlapping extra taxa.
+
+## Output format
+
+For each input multiset, the output file contains one completed tree per line in Newick format:
+
+* input: `input_multisets/multiset_X.txt`
+* output: `completed_multisets/completed_multiset_X.txt`
 
 ## Dependencies
 
-- **Python 3.6 or higher**
-- **ETE3**: For phylogenetic tree manipulation.
-- **NumPy**: For numerical computations.
+* Python 3.6+
+* `ete3`
+* `numpy`
 
-Install dependencies using:
+Install them with:
 
 ```bash
 pip install ete3 numpy
 ```
 
-*Additional dependencies may be required based on future updates.*
+## Citation
 
+If you use this repository in academic work, please cite the associated paper describing the overlapping tree set completion algorithm (in progress).
 
 ## License
 
