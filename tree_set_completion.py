@@ -196,6 +196,49 @@ def drop_anonymous_leaves(t):
     for lf in list(t.iter_leaves()):
         if not lf.name:    # empty string or None
             lf.detach()
+            
+def suppress_unary_nodes(t):
+    """
+    Collapse internal nodes with exactly one child, preserving all
+    root-to-leaf and leaf-to-leaf path lengths.
+
+    The tree is modified in-place and also returned.
+    """
+    changed = True
+    while changed:
+        changed = False
+
+        for n in list(t.traverse("postorder")):
+            if n.is_leaf():
+                continue
+            if len(n.children) != 1:
+                continue
+
+            c = n.children[0]
+
+            # Non-root unary node: suppress it directly.
+            if n.up is not None:
+                p = n.up
+                c.detach()
+                p.add_child(c)
+                c.dist += n.dist
+                n.detach()
+                changed = True
+                continue
+
+            if not c.is_leaf():
+                grandkids = list(c.children)
+                incoming = c.dist
+                c.detach()
+
+                for gc in grandkids:
+                    gc.detach()
+                    t.add_child(gc)
+                    gc.dist += incoming
+
+                changed = True
+
+    return t
 
 
 # Section 2a. Distance oracle & optimization helpers
@@ -380,20 +423,19 @@ def insert_subtree_at_point(target_tree, edge, x_opt, subtree_copy,
                             eps=1e-6, min_terminal=1e-9):
     """
     Insert subtree_copy into target_tree along 'edge' at fraction x_opt
-    from the parent side. We handle three cases:
-      1) x_opt ~ 0 => attach subtree as another child of parent (no edge split)
-      2) x_opt ~ 1 => attach subtree as another child of child (if child is internal)
-      3) otherwise => split edge with new internal node.
-
-    The new edges used for the subtree are marked child.is_original_edge = False,
-    so they won't be used for future anchor edges.
+    from the parent side.
     """
     parent, child = edge
     orig_len = child.dist
 
+    # Keep the subtree's connecting branch positive
+    attach_len = subtree_copy.dist
+    if attach_len is None or attach_len <= 0:
+        attach_len = min_terminal
+    subtree_copy.dist = attach_len
+
     # 1) Attach almost at the parent
     if x_opt <= eps:
-        # parent has new child subtree_copy
         subtree_copy.add_feature("is_original_edge", False)
         subtree_copy.add_feature("edge_index", -1)
         parent.add_child(subtree_copy)
@@ -401,15 +443,13 @@ def insert_subtree_at_point(target_tree, edge, x_opt, subtree_copy,
 
     # 2) Attach almost at the child
     if x_opt >= 1 - eps:
-        # If child is not a leaf (has children), we attach as child of "child".
         if not child.is_leaf():
             subtree_copy.add_feature("is_original_edge", False)
             subtree_copy.add_feature("edge_index", -1)
             child.add_child(subtree_copy)
             return
-        # If child is a leaf, we still split, but with a very small top edge or bottom edge.
-        # We'll let bottom be extremely tiny:
-        d_up   = orig_len - min_terminal
+
+        d_up   = max(orig_len - min_terminal, min_terminal)
         d_down = min_terminal
 
         mid = Tree()
@@ -417,13 +457,13 @@ def insert_subtree_at_point(target_tree, edge, x_opt, subtree_copy,
         mid.add_feature("is_original_edge", True)
         mid.add_feature("edge_index", child.edge_index)
 
-        # rewire
         parent.remove_child(child)
         parent.add_child(mid)
         child.dist = d_down
         mid.add_child(child)
 
-        subtree_copy.dist = 0.0
+        # preserve attach_len instead of forcing 0.0
+        subtree_copy.dist = attach_len
         subtree_copy.add_feature("is_original_edge", False)
         subtree_copy.add_feature("edge_index", -1)
         mid.add_child(subtree_copy)
@@ -443,7 +483,8 @@ def insert_subtree_at_point(target_tree, edge, x_opt, subtree_copy,
     child.dist = d_down
     mid.add_child(child)
 
-    subtree_copy.dist = 0.0
+    # preserve attach_len instead of forcing 0.0
+    subtree_copy.dist = attach_len
     subtree_copy.add_feature("is_original_edge", False)
     subtree_copy.add_feature("edge_index", -1)
     mid.add_child(subtree_copy)
@@ -465,8 +506,29 @@ def compute_weights_globally(T_set, T_i):
         wj = len(Li & Lj)/denom
         weights.append(wj)
     return weights
+    
+def _weighted_mean_length(weighted_lengths, default=1e-6):
+    """
+    weighted_lengths: iterable of (weight, length)
+    Returns a positive weighted mean when possible, otherwise `default`.
+    """
+    num = 0.0
+    den = 0.0
+    for w, ell in weighted_lengths:
+        if w is None or w <= 0:
+            continue
+        if ell is None:
+            continue
+        if ell < 0:
+            continue
+        num += w * ell
+        den += w
+    if den <= 0:
+        return default
+    val = num / den
+    return val if val > 0 else default
 
-def build_consensus_mcs(mcs_groups):
+def build_consensus_mcs(mcs_groups, min_branch=1e-6):
     """
     Given mcs_groups (list of (leafset_key, [subtrees_with_same_leafset], [host_indices])),
     perform weighted majority-rule consensus on each group, returning:
@@ -476,152 +538,167 @@ def build_consensus_mcs(mcs_groups):
     consensus_subtrees = []
     host_index_groups  = []
 
+    global global_T_set, global_T_i
+    if not global_T_set or global_T_i is None:
+        raise RuntimeError(
+            "global_T_set / global_T_i not defined, please set before calling build_consensus_mcs"
+        )
+
+    weights = compute_weights_globally(global_T_set, global_T_i)
+
     for leafset_key, subtrees, host_idxs in mcs_groups:
-        # Let L(M_t) = leafset_key
         if len(leafset_key) == 0:
             continue
+
+        # singleton case
         if len(leafset_key) == 1:
-            # single leaf: just consensus leaf
             leaf_name = leafset_key[0]
+
+            pendants = []
+            for st, j_index in zip(subtrees, host_idxs):
+                wj = weights[j_index]
+                if wj <= 0:
+                    continue
+                # st is the leaf itself in this case
+                pendants.append((wj, max(st.dist, min_branch)))
+
             root = Tree(name=leaf_name)
-            root.dist = 0.0
+            root.dist = _weighted_mean_length(pendants, default=min_branch)
             consensus_subtrees.append(root)
             host_index_groups.append(host_idxs)
             continue
 
-        # Need to do split-based majority-rule with weights.
-        # We'll treat each subtree S_j as coming from T_j in the current host_list.
-        # global_T_set is the list of source trees in this iteration.
-        global global_T_set, global_T_i
-        if not global_T_set or global_T_i is None:
-            raise RuntimeError("global_T_set / global_T_i not defined, please set before calling build_consensus_mcs")
-
-        weights = compute_weights_globally(global_T_set, global_T_i)
-
-        # Collect all splits
-        split_lengths = defaultdict(list)  # sp -> list of (weight, edge_length)
-        total_weight = 0.0
+        # multi-leaf case
+        split_lengths = defaultdict(list)   # split -> list[(weight, edge_length)]
+        total_weight  = 0.0
 
         for st, j_index in zip(subtrees, host_idxs):
-            # st is the subtree in T_j with leafset leafset_key.
             wj = weights[j_index]
-            if wj <= 0:  # skip zero weight
+            if wj <= 0:
                 continue
+
             total_weight += wj
-            # get splits: for each internal edge, define bipartition
+
+            # Collect branch lengths for child-induced splits
             for nd in st.traverse("postorder"):
-                if nd.is_leaf(): continue
-                # removing nd.dist edge from its parent (if any) => bipart
-                # But we define splits by each internal edge below nd's parent
-                # For clarity, we treat each child-edge in st as an internal edge.
+                if nd.is_leaf():
+                    continue
                 for child in nd.children:
-                    # root side vs subtree side
-                    subtree_leaves = set([lf.name for lf in child.iter_leaves()])
-                    # Represent split as (frozenset(A), frozenset(B)) with A smaller
+                    subtree_leaves = set(lf.name for lf in child.iter_leaves())
                     A = frozenset(subtree_leaves)
                     B = frozenset(leafset_key) - A
                     sp = (A, B) if len(A) <= len(B) else (B, A)
                     split_lengths[sp].append((wj, child.dist))
 
-            # Also connecting branch from parent( r_S ) to LCA(leafset_key) in T_j
+            # Connecting branch: branch from the parent of the MCS root in host tree
             rS = subtree_rooted_at_lca(global_T_set[j_index], leafset_key)
             if rS is not None and rS.up is not None:
-                cbranch_len = rS.dist
-                # We treat the "connecting branch" as a special pseudo-split
-                # with negative key (just store separately).
-                sp_conn = ("CONNECTING_BRANCH",)
-                split_lengths[sp_conn].append((wj, cbranch_len))
+                split_lengths[("CONNECTING_BRANCH",)].append((wj, rS.dist))
 
         if total_weight <= 0:
-            # no contribution?
             continue
 
-        # Weighted majority-rule: include sp if
-        # f(sp) = sum_{j} w_j I{sp in SP_j} / sum_j w_j  > 0.5
-        # But we only stored lengths for splits that do appear.
-        final_splits = []
-        final_lengths = {}
+        final_splits   = []
+        final_lengths  = {}
 
         for sp, wlen_list in split_lengths.items():
-            w_sum = sum(w for (w,_) in wlen_list)
-            if sp == ("CONNECTING_BRANCH",):
-                # connecting branch always used if any weight
-                if w_sum > 0:
-                    length = sum(w*ell for (w,ell) in wlen_list)/w_sum
-                    final_lengths[sp] = length
+            w_sum = sum(w for (w, _) in wlen_list)
+            if w_sum <= 0:
                 continue
+
+            if sp == ("CONNECTING_BRANCH",):
+                final_lengths[sp] = _weighted_mean_length(wlen_list, default=min_branch)
+                continue
+
             f_sp = w_sum / total_weight
             if f_sp > 0.5:
                 final_splits.append(sp)
-                length = sum(w*ell for (w,ell) in wlen_list)/w_sum
-                final_lengths[sp] = length
+                final_lengths[sp] = _weighted_mean_length(wlen_list, default=min_branch)
 
-        # Build consensus topology via a simple greedy split-addition approach:
-        # start from a star, then refine using final_splits.
-        # For small leafset_key, we can do a naive approach:
+        # Build consensus topology
         leaf2node = {nm: Tree(name=nm) for nm in leafset_key}
         current_root = Tree()
         for nm, lf in leaf2node.items():
             current_root.add_child(lf)
 
-        # Sort splits by size to refine smaller first
         final_splits.sort(key=lambda sp: min(len(sp[0]), len(sp[1])))
 
         for sp in final_splits:
             A, B = sp
-            # We want an internal node that has leaves in A in one side, B in other.
-            # We'll refine current_root to introduce that split if not present.
-            # A simpler but heavier approach:
-            #  1) find the minimal subtree covering leaves in A
-            #  2) if it already forms a clade, do nothing
-            #  3) else restructure.
-            # In interest of time, we do "clade refine" that only works nicely
-            # if the splits are compatible; majority-rule with only the
-            # chosen splits is typically compatible, so we proceed.
-
-            # 1) gather all leaves in A
             nodesA = [leaf2node[nm] for nm in A]
             lcaA = current_root.get_common_ancestor(nodesA)
+            leaves_lcaA = set(lf.name for lf in lcaA.iter_leaves())
 
-            # Check if lcaA is clean: all its leaves are subset of A
-            leaves_lcaA = set([lf.name for lf in lcaA.iter_leaves()])
             if leaves_lcaA == A:
-                # Already a clade, do nothing to topology
                 continue
 
-            # Otherwise, we restructure: we create a new internal node for A.
-            # Steps:
-            #  - all leaves in A are collected under new node A_int
-            #  - reattach them so that they form a child clade somewhere
             A_int = Tree()
-            # we detach those leaves and reattach under A_int
             for nm in A:
                 lf = leaf2node[nm]
                 lf.detach()
                 A_int.add_child(lf)
-
-            # attach A_int to lcaA
             lcaA.add_child(A_int)
 
-        # Now we have a consensus topology
-        # with the correct leafset; assign branch lengths using final_lengths:
+        # Helper: estimate a positive length for a clade from the supporting subtrees
+        def estimate_clade_length(clade_leafset):
+            vals = []
+            clade_leafset = set(clade_leafset)
+
+            for st, j_index in zip(subtrees, host_idxs):
+                wj = weights[j_index]
+                if wj <= 0:
+                    continue
+
+                st_leaves = get_leaf_set_ete(st)
+                if not clade_leafset.issubset(st_leaves):
+                    continue
+
+                r = subtree_rooted_at_lca(st, clade_leafset)
+                if r is None or r.up is None:
+                    continue
+
+                if get_leaf_set_ete(r) == clade_leafset:
+                    vals.append((wj, r.dist))
+
+            if vals:
+                return _weighted_mean_length(vals, default=min_branch)
+            return None
+
+        positive_lengths = [
+            ell for sp, ell in final_lengths.items()
+            if sp != ("CONNECTING_BRANCH",) and ell is not None and ell > 0
+        ]
+        default_internal = (
+            sum(positive_lengths) / len(positive_lengths)
+            if positive_lengths else min_branch
+        )
+        if default_internal <= 0:
+            default_internal = min_branch
+
+        # Assign branch lengths to consensus tree
         for nd in current_root.traverse("postorder"):
             if nd.up is None:
                 continue
-            # identify the split induced by nd's branch:
-            leaves_here = set([lf.name for lf in nd.iter_leaves()])
+
+            leaves_here = set(lf.name for lf in nd.iter_leaves())
             A = frozenset(leaves_here)
             B = frozenset(leafset_key) - A
-            sp = (A,B) if len(A)<=len(B) else (B,A)
-            if sp in final_lengths:
-                nd.dist = final_lengths[sp]
-            else:
-                # fallback
-                nd.dist = 0.0
+            sp = (A, B) if len(A) <= len(B) else (B, A)
 
-        # connecting branch length
-        conn_len = final_lengths.get(("CONNECTING_BRANCH",), 0.0)
-        # We'll set the root dist = conn_len, leaving actual hooking to the host tree
+            if sp in final_lengths and final_lengths[sp] > 0:
+                nd.dist = final_lengths[sp]
+                continue
+
+            est = estimate_clade_length(leaves_here)
+            if est is not None and est > 0:
+                nd.dist = est
+            else:
+                nd.dist = default_internal
+
+        conn_len = final_lengths.get(("CONNECTING_BRANCH",), None)
+        if conn_len is None or conn_len <= 0:
+            # Positive fallback
+            conn_len = default_internal
         current_root.dist = conn_len
 
         consensus_subtrees.append(current_root)
@@ -1029,7 +1106,9 @@ def complete_all_multisets():
                 drop_anonymous_leaves(tgt_updated)
                 binarize_multifurcations(tgt_updated, eps=0.0)
                 
-
+            # Clean up degree-1 internal nodes before saving the tree.
+            suppress_unary_nodes(tgt_updated)
+            
             completed.append(tgt_updated)
 
         # Write output
