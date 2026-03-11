@@ -1,0 +1,1 @@
+Majority-rule consensus evaluation
