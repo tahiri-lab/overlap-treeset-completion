@@ -52,7 +52,7 @@ The scripts in this folder support the main analyses reported in the paper, incl
 
 ## Notes
 
-- The refined binary version of completed trees is used for RF-based evaluation.
+- The refined binary version of completed trees and the default value of k (all common leaves) are used for evaluations.
 - BSD is unaffected by multifurcation resolution because pairwise leaf-to-leaf distances are preserved.
 - Some scripts may require external tools or additional dependencies depending on the baseline being reproduced.
 
