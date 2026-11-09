@@ -4,6 +4,10 @@ This repository contains a Python implementation of a **set-wide phylogenetic tr
 
 For each target tree, the algorithm identifies maximal completion subtrees (MCSs) supported by the other trees, builds a weighted majority-rule consensus for each selected subtree, rescales branch lengths using distances derived from common leaves, and inserts the consensus subtree at the position that minimizes a quadratic objective function on the original target tree branches.
 
+If you use this repository or its methods in your research, please cite the following work:
+
+> Koshkarov, A., & Tahiri, N. (2026). Polynomial-time completion of phylogenetic tree sets. *Bulletin of Mathematical Biology*, 88(10), 178. [https://doi.org/10.1007/s11538-026-01711-6](https://doi.org/10.1007/s11538-026-01711-6)
+
 ## What the implementation does
 
 - Completes every tree in a multiset using overlap information from the other trees.
